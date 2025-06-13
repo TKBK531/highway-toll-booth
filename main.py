@@ -103,23 +103,9 @@ def is_point_before_line(point, line_p1, line_p2):
     return (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1) < 0
 
 
-def get_line_from_user(frame):
-    points = []
-    clone = frame.copy()
-
-    def click_event(event, x, y, flags, param):
-        if event == cv2.EVENT_LBUTTONDOWN:
-            points.append((x, y))
-            cv2.circle(clone, (x, y), 5, (0, 0, 255), -1)
-            cv2.imshow("Select Line (click 2 points)", clone)
-
-    cv2.imshow("Select Line (click 2 points)", clone)
-    cv2.setMouseCallback("Select Line (click 2 points)", click_event)
-    while len(points) < 2:
-        if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
-            break
-    cv2.destroyWindow("Select Line (click 2 points)")
-    return points[0], points[1]
+# Define the detection line statically
+LINE_P1 = (374, 95)
+LINE_P2 = (1254, 398)
 
 
 def main():
@@ -165,27 +151,13 @@ def main():
 
     col_keys_ordered_for_table = ["id", "type", "from", "to", "duration"]
 
-    # --- User selects line on first frame ---
-    ret, frame = cap.read()
-    if not ret:
-        print("Error: Could not read the first frame for line selection.")
-        return
-    print("Please click two points on the frame to define the detection line.")
-    global LINE_P1, LINE_P2
-    LINE_P1, LINE_P2 = get_line_from_user(frame)
-    print(f"Line defined from {LINE_P1} to {LINE_P2}")
-    frame_idx = 1  # Already read the first frame
-
+    # Start reading frames from the beginning
     try:
         while True:
-            if frame_idx == 1:
-                # Use the already-read frame
-                pass
-            else:
-                ret, frame = cap.read()
-                if not ret:
-                    print("End of video stream reached.")
-                    break
+            ret, frame = cap.read()
+            if not ret:
+                print("End of video stream reached.")
+                break
 
             current_timestamp_sec_video = frame_idx / fps
             processed_frames_count += 1
