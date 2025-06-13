@@ -95,6 +95,33 @@ def format_table_row(data_tuple, widths_dict, col_keys_ordered):
     return "".join(parts)
 
 
+def is_point_before_line(point, line_p1, line_p2):
+    # Returns True if the point is on the "before" side of the line (left of the line vector)
+    x, y = point
+    x1, y1 = line_p1
+    x2, y2 = line_p2
+    return (x - x1) * (y2 - y1) - (y - y1) * (x2 - x1) < 0
+
+
+def get_line_from_user(frame):
+    points = []
+    clone = frame.copy()
+
+    def click_event(event, x, y, flags, param):
+        if event == cv2.EVENT_LBUTTONDOWN:
+            points.append((x, y))
+            cv2.circle(clone, (x, y), 5, (0, 0, 255), -1)
+            cv2.imshow("Select Line (click 2 points)", clone)
+
+    cv2.imshow("Select Line (click 2 points)", clone)
+    cv2.setMouseCallback("Select Line (click 2 points)", click_event)
+    while len(points) < 2:
+        if cv2.waitKey(1) & 0xFF == 27:  # ESC to exit
+            break
+    cv2.destroyWindow("Select Line (click 2 points)")
+    return points[0], points[1]
+
+
 def main():
     video_start_offset_seconds = parse_time_to_seconds(VIDEO_START_TIME_STR)
     if video_start_offset_seconds > 0:
@@ -138,12 +165,27 @@ def main():
 
     col_keys_ordered_for_table = ["id", "type", "from", "to", "duration"]
 
+    # --- User selects line on first frame ---
+    ret, frame = cap.read()
+    if not ret:
+        print("Error: Could not read the first frame for line selection.")
+        return
+    print("Please click two points on the frame to define the detection line.")
+    global LINE_P1, LINE_P2
+    LINE_P1, LINE_P2 = get_line_from_user(frame)
+    print(f"Line defined from {LINE_P1} to {LINE_P2}")
+    frame_idx = 1  # Already read the first frame
+
     try:
         while True:
-            ret, frame = cap.read()
-            if not ret:
-                print("End of video stream reached.")
-                break
+            if frame_idx == 1:
+                # Use the already-read frame
+                pass
+            else:
+                ret, frame = cap.read()
+                if not ret:
+                    print("End of video stream reached.")
+                    break
 
             current_timestamp_sec_video = frame_idx / fps
             processed_frames_count += 1
@@ -157,7 +199,10 @@ def main():
                 for i in range(len(boxes)):
                     class_id = int(clss[i])
                     if class_id in VEHICLE_CLASS_IDS:
-                        detected_vehicles_info.append((boxes[i], class_id))
+                        bbox = boxes[i]
+                        center = calculate_bbox_center(bbox)
+                        if is_point_before_line(center, LINE_P1, LINE_P2):
+                            detected_vehicles_info.append((bbox, class_id))
 
             front_vehicle_info = None
             front_vehicle_bbox = None
@@ -265,6 +310,9 @@ def main():
                 x1, y1, x2, y2 = map(int, bbox_info_tuple[0])
                 cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 255, 0), 1)
 
+            # Draw the angled line for visualization
+            cv2.line(display_frame, LINE_P1, LINE_P2, (255, 0, 255), 2)
+
             if front_vehicle_bbox is not None:
                 x1, y1, x2, y2 = map(int, front_vehicle_bbox)
                 cv2.rectangle(display_frame, (x1, y1), (x2, y2), (0, 0, 255), 2)
@@ -346,70 +394,54 @@ def main():
                     }
                 )
 
-        cap.release()
-        cv2.destroyAllWindows()
-
-        with open(OUTPUT_FILE, "w") as f:
-            f.write("Front Vehicle Stationary Times Log\n")
-            f.write("==================================\n")
-            f.write(f"Stationary Threshold: {MIN_STATIONARY_DURATION_SECONDS:.1f}s\n")
-            f.write("==================================\n")
-
-            total_table_width = (
-                sum(COLUMN_WIDTHS[key] for key in col_keys_ordered_for_table)
-                + len(col_keys_ordered_for_table)
-                + 1
-            )
-            f.write("-" * total_table_width + "\n\n")
-
-            line_sep = create_table_line(COLUMN_WIDTHS, col_keys_ordered_for_table)
-            f.write(line_sep + "\n")
-
-            header_data_tuple = tuple(TABLE_HEADERS)
-            f.write(
-                format_table_row(
-                    header_data_tuple, COLUMN_WIDTHS, col_keys_ordered_for_table
-                )
-                + "\n"
-            )
-            f.write(line_sep + "\n")
-
-            if not stationary_log:
-                empty_row_data = tuple(["-" for _ in col_keys_ordered_for_table])
-                f.write(
-                    format_table_row(
-                        empty_row_data, COLUMN_WIDTHS, col_keys_ordered_for_table
-                    )
-                    + "\n"
-                )
-                f.write(line_sep + "\n")
-                f.write("No stationary periods detected meeting the criteria.\n\n")
-            else:
-                for record in stationary_log:
-                    start_time_with_offset = (
-                        record["start_sec_video"] + video_start_offset_seconds
-                    )
-                    end_time_with_offset = (
-                        record["end_sec_video"] + video_start_offset_seconds
-                    )
-
-                    data_tuple = (
-                        record["vehicle_id"],
-                        record["vehicle_type"],
-                        format_time(start_time_with_offset),
-                        format_time(end_time_with_offset),
-                        f"{record['duration_sec']:.2f}",
+        # --- Write log to file ---
+        if OUTPUT_FILE:
+            try:
+                with open(OUTPUT_FILE, "w") as f:
+                    # Write the header
+                    f.write(
+                        create_table_line(COLUMN_WIDTHS, col_keys_ordered_for_table)
+                        + "\n"
                     )
                     f.write(
                         format_table_row(
-                            data_tuple, COLUMN_WIDTHS, col_keys_ordered_for_table
+                            TABLE_HEADERS, COLUMN_WIDTHS, col_keys_ordered_for_table
                         )
                         + "\n"
                     )
-                f.write(line_sep + "\n")
+                    f.write(
+                        create_table_line(COLUMN_WIDTHS, col_keys_ordered_for_table)
+                        + "\n"
+                    )
 
-        print(f"\nProcessing complete. Stationary times recorded in '{OUTPUT_FILE}'")
-        print(f"Total frames processed: {processed_frames_count}")
+                    # Write each stationary event
+                    for event in stationary_log:
+                        f.write(
+                            format_table_row(
+                                [
+                                    event["vehicle_id"],
+                                    event["vehicle_type"],
+                                    format_time(event["start_sec_video"]),
+                                    format_time(event["end_sec_video"]),
+                                    f"{event['duration_sec']:.1f}",
+                                ],
+                                COLUMN_WIDTHS,
+                                col_keys_ordered_for_table,
+                            )
+                            + "\n"
+                        )
+
+                    f.write(
+                        create_table_line(COLUMN_WIDTHS, col_keys_ordered_for_table)
+                        + "\n"
+                    )
+
+                print(f"Log written to {OUTPUT_FILE}")
+            except Exception as e:
+                print(f"Error writing log to file: {e}")
+
+        cap.release()
+        cv2.destroyAllWindows()
 
 
 if __name__ == "__main__":
