@@ -175,6 +175,7 @@ pyrightconfig.json
 
 log.txt
 *.mp4 
+*.avi
 yolov8n.pt
 
-# End of https://www.toptal.com/developers/gitignore/api/python
+# End of https://www.toptal.com/developers/gitignore/api/python 
