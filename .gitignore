@@ -178,4 +178,8 @@ log.txt
 *.avi
 yolov8n.pt
 
+# Logs folder - ignore all contents except .gitkeep
+logs/*
+!logs/.gitkeep
+
 # End of https://www.toptal.com/developers/gitignore/api/python 

@@ -32,6 +32,7 @@ class TollBoothGUI:
         # Setup GUI
         self.setup_gui()
         self.check_model_status()
+        self.ensure_logs_directory()
         
     def setup_gui(self):
         """Setup the main GUI layout."""
@@ -169,7 +170,7 @@ class TollBoothGUI:
         
     def _create_status_bar(self, parent):
         """Create the status bar."""
-        self.status_var.set("Ready - Please select a video file and log location")
+        self.status_var.set("Ready - Please select a video file (log will be auto-generated in logs folder)")
         self.status_bar = ttk.Label(parent, textvariable=self.status_var, 
                                    relief=tk.SUNKEN, anchor=tk.W)
         self.status_bar.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
@@ -194,12 +195,22 @@ class TollBoothGUI:
         if filename:
             self.video_path.set(filename)
             self.status_var.set(f"Video selected: {os.path.basename(filename)}")
+            self.set_default_log_filename(filename)
             self.load_first_frame(filename)
     
     def browse_log_file(self):
         """Browse for log file location."""
+        # Default to logs folder
+        initial_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+        
+        # Get current log path for initial filename
+        current_log = self.log_path.get()
+        initial_filename = os.path.basename(current_log) if current_log else "detection_log.txt"
+        
         filename = filedialog.asksaveasfilename(
             title="Save Log File As",
+            initialdir=initial_dir,
+            initialfile=initial_filename,
             defaultextension=".txt",
             filetypes=[
                 ("Text files", "*.txt"),
@@ -210,6 +221,27 @@ class TollBoothGUI:
             self.log_path.set(filename)
             self.status_var.set(f"Log location: {os.path.basename(filename)}")
     
+    def set_default_log_filename(self, video_path):
+        """Set default log filename based on the selected video."""
+        try:
+            # Get video filename without extension
+            video_name = os.path.splitext(os.path.basename(video_path))[0]
+            
+            # Create logs directory if it doesn't exist
+            logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+            
+            # Generate default log filename
+            log_filename = f"{video_name}_detection_log.txt"
+            default_log_path = os.path.join(logs_dir, log_filename)
+            
+            # Set the log path
+            self.log_path.set(default_log_path)
+            self.status_var.set(f"Video selected: {os.path.basename(video_path)} | Default log: {log_filename}")
+            
+        except Exception as e:
+            self.status_var.set(f"Video selected: {os.path.basename(video_path)} | Error setting default log: {str(e)}")
+    
     def start_processing(self):
         """Start video processing."""
         # Validation
@@ -218,8 +250,12 @@ class TollBoothGUI:
             return
         
         if not self.log_path.get():
-            messagebox.showerror("Error", "Please select a log file location")
-            return
+            # Auto-generate log path if not set
+            if self.video_path.get():
+                self.set_default_log_filename(self.video_path.get())
+            else:
+                messagebox.showerror("Error", "Please select a video file first")
+                return
         
         # Validate start time format
         start_time_str = self.video_start_time.get().strip()
@@ -373,12 +409,19 @@ class TollBoothGUI:
         if self.video_path.get():
             self.root.after(3000, lambda: self.load_first_frame(self.video_path.get()))
         
-        messagebox.showinfo(
+        # Show completion dialog
+        result = messagebox.askquestion(
             "Processing Complete", 
             f"Video processing completed successfully!\n\n"
             f"Detected {event_count} stationary events.\n"
-            f"Results saved to: {self.log_path.get()}"
+            f"Results saved to: {os.path.basename(self.log_path.get())}\n\n"
+            f"Would you like to open the logs folder?",
+            icon='question'
         )
+        
+        # Open logs folder if user wants to
+        if result == 'yes':
+            self.open_logs_folder()
     
     def load_first_frame(self, video_path):
         """Load and display the first frame of the selected video with detection line."""
@@ -467,6 +510,53 @@ class TollBoothGUI:
             return False
         except (ValueError, AttributeError):
             return False
+    
+    def open_logs_folder(self):
+        """Open the logs folder in the file explorer."""
+        try:
+            log_file_path = self.log_path.get()
+            if log_file_path and os.path.exists(log_file_path):
+                # Open the folder containing the log file
+                folder_path = os.path.dirname(log_file_path)
+                
+                # Platform-specific folder opening
+                import platform
+                system = platform.system()
+                
+                if system == "Windows":
+                    # Use explorer to open folder and select the file
+                    os.system(f'explorer /select,"{log_file_path}"')
+                elif system == "Darwin":  # macOS
+                    os.system(f'open -R "{log_file_path}"')
+                else:  # Linux and others
+                    os.system(f'xdg-open "{folder_path}"')
+                    
+            else:
+                # Fallback: open logs directory
+                logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+                if os.path.exists(logs_dir):
+                    import platform
+                    system = platform.system()
+                    
+                    if system == "Windows":
+                        os.system(f'explorer "{logs_dir}"')
+                    elif system == "Darwin":  # macOS
+                        os.system(f'open "{logs_dir}"')
+                    else:  # Linux and others
+                        os.system(f'xdg-open "{logs_dir}"')
+                        
+        except Exception as e:
+            print(f"Error opening logs folder: {e}")
+            # Show message to user
+            messagebox.showinfo("Info", f"Processing complete! Log saved to:\n{self.log_path.get()}")
+    
+    def ensure_logs_directory(self):
+        """Ensure the logs directory exists."""
+        try:
+            logs_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "logs")
+            os.makedirs(logs_dir, exist_ok=True)
+        except Exception as e:
+            print(f"Warning: Could not create logs directory: {e}")
     
 def main():
     """Main entry point for the application."""
