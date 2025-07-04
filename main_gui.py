@@ -123,6 +123,9 @@ class TollBoothGUI:
                                      height=VIDEO_DISPLAY_SIZE[1])
         self.video_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
         
+        # Add default text to video canvas
+        self.show_default_video_message()
+        
         # Video info
         self.video_info_label = ttk.Label(video_frame, text="No video loaded")
         self.video_info_label.grid(row=1, column=0, pady=(5, 0))
@@ -176,6 +179,7 @@ class TollBoothGUI:
         if filename:
             self.video_path.set(filename)
             self.status_var.set(f"Video selected: {os.path.basename(filename)}")
+            self.load_first_frame(filename)
     
     def browse_log_file(self):
         """Browse for log file location."""
@@ -210,6 +214,15 @@ class TollBoothGUI:
         for item in self.results_tree.get_children():
             self.results_tree.delete(item)
         
+        # Clear preview frame and show processing message
+        self.video_canvas.delete("all")
+        self.video_canvas.create_text(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2,
+            text="Processing...", 
+            fill="yellow", 
+            font=("Arial", 14, "bold")
+        )
+        
         # Update UI
         self.process_btn.configure(state=tk.DISABLED)
         self.stop_btn.configure(state=tk.NORMAL)
@@ -224,6 +237,10 @@ class TollBoothGUI:
         self.video_processor.stop_processing()
         self.reset_ui()
         self.status_var.set("Processing stopped by user")
+        
+        # Restore preview if video is selected
+        if self.video_path.get():
+            self.load_first_frame(self.video_path.get())
     
     def reset_ui(self):
         """Reset UI to initial state."""
@@ -249,7 +266,7 @@ class TollBoothGUI:
     
     def update_video_info(self, info):
         """Update video information display."""
-        text = (f"Original: {info['original']} | Target: {info['target']} | "
+        text = (f"Processing: {info['original']} → {info['target']} | "
                 f"FPS: {info['fps']:.2f} | Tolerance: {info['tolerance']}px")
         self.video_info_label.configure(text=text)
     
@@ -305,13 +322,105 @@ class TollBoothGUI:
         self.status_var.set(f"Processing complete! Found {event_count} stationary events")
         self.progress_bar['value'] = 100
         self.progress_label.configure(text="Complete")
+        
+        # Show completion message in video canvas temporarily
+        self.video_canvas.delete("all")
+        self.video_canvas.create_text(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2 - 20,
+            text="Processing Complete!", 
+            fill="green", 
+            font=("Arial", 14, "bold")
+        )
+        self.video_canvas.create_text(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2 + 10,
+            text=f"Found {event_count} stationary events", 
+            fill="white", 
+            font=("Arial", 10)
+        )
+        
+        # Restore preview after 3 seconds
+        if self.video_path.get():
+            self.root.after(3000, lambda: self.load_first_frame(self.video_path.get()))
+        
         messagebox.showinfo(
             "Processing Complete", 
             f"Video processing completed successfully!\n\n"
             f"Detected {event_count} stationary events.\n"
             f"Results saved to: {self.log_path.get()}"
         )
-
+    
+    def load_first_frame(self, video_path):
+        """Load and display the first frame of the selected video with detection line."""
+        try:
+            cap = cv2.VideoCapture(video_path)
+            if not cap.isOpened():
+                self.status_var.set("Error: Could not open video file")
+                return
+            
+            # Get video properties
+            fps = cap.get(cv2.CAP_PROP_FPS)
+            if fps == 0 or fps is None:
+                fps = 30.0
+            
+            original_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            original_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            
+            # Read first frame
+            ret, frame = cap.read()
+            cap.release()
+            
+            if not ret:
+                self.status_var.set("Error: Could not read first frame")
+                return
+            
+            # Resize frame to target resolution for preview
+            resized_frame = cv2.resize(frame, (TARGET_WIDTH, TARGET_HEIGHT), interpolation=cv2.INTER_AREA)
+            
+            # Get detection line for the preview
+            line_p1, line_p2 = self.video_processor.detection_engine.get_scaled_detection_line(
+                TARGET_WIDTH, TARGET_HEIGHT
+            )
+            
+            # Draw detection line on preview
+            preview_frame = resized_frame.copy()
+            cv2.line(preview_frame, line_p1, line_p2, (255, 0, 255), 2)
+            
+            # Add preview text
+            cv2.putText(preview_frame, "PREVIEW - Detection Line Shown", 
+                       (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
+            cv2.putText(preview_frame, "Click 'Start Processing' to begin", 
+                       (10, 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1)
+            
+            # Display the preview frame
+            self.update_video_display(preview_frame)
+            
+            # Update video info
+            self.video_info_label.configure(
+                text=f"Preview: {original_width}x{original_height} → {TARGET_WIDTH}x{TARGET_HEIGHT} | "
+                     f"FPS: {fps:.2f} | Frames: {total_frames} | Ready to process"
+            )
+            
+        except Exception as e:
+            self.status_var.set(f"Error loading video preview: {str(e)}")
+    
+    def show_default_video_message(self):
+        """Show default message in video canvas when no video is loaded."""
+        self.video_canvas.delete("all")
+        # Add text to indicate no video loaded
+        self.video_canvas.create_text(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2 - 20,
+            text="No Video Selected", 
+            fill="white", 
+            font=("Arial", 14, "bold")
+        )
+        self.video_canvas.create_text(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2 + 10,
+            text="Click 'Browse' to select a video file", 
+            fill="gray", 
+            font=("Arial", 10)
+        )
+    
 
 def main():
     """Main entry point for the application."""
