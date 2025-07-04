@@ -20,7 +20,11 @@ class TollBoothGUI:
         # Variables
         self.video_path = tk.StringVar()
         self.log_path = tk.StringVar()
+        self.video_start_time = tk.StringVar()
         self.status_var = tk.StringVar()
+        
+        # Set default start time
+        self.video_start_time.set(DEFAULT_VIDEO_START_TIME)
         
         # Video processor
         self.video_processor = VideoProcessor(gui_callback=self.handle_processor_callback)
@@ -67,12 +71,23 @@ class TollBoothGUI:
         ttk.Button(file_frame, text="Browse", 
                   command=self.browse_video_file).grid(row=0, column=2)
         
+        # Video start time selection
+        ttk.Label(file_frame, text="Video Start Time:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+        start_time_frame = ttk.Frame(file_frame)
+        start_time_frame.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
+        
+        self.start_time_entry = ttk.Entry(start_time_frame, textvariable=self.video_start_time, width=15)
+        self.start_time_entry.grid(row=0, column=0, sticky=tk.W)
+        
+        ttk.Label(start_time_frame, text="(HH:MM:SS format - when the video recording actually started)", 
+                 font=("Arial", 8)).grid(row=0, column=1, sticky=tk.W, padx=(10, 0))
+        
         # Log file selection
-        ttk.Label(file_frame, text="Log File:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+        ttk.Label(file_frame, text="Log File:").grid(row=2, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
         self.log_entry = ttk.Entry(file_frame, textvariable=self.log_path, width=50)
-        self.log_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
+        self.log_entry.grid(row=2, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
         ttk.Button(file_frame, text="Browse", 
-                  command=self.browse_log_file).grid(row=1, column=2, pady=(10, 0))
+                  command=self.browse_log_file).grid(row=2, column=2, pady=(10, 0))
         
     def _create_controls(self, parent):
         """Create the control buttons and progress section."""
@@ -206,6 +221,13 @@ class TollBoothGUI:
             messagebox.showerror("Error", "Please select a log file location")
             return
         
+        # Validate start time format
+        start_time_str = self.video_start_time.get().strip()
+        if not self.validate_time_format(start_time_str):
+            messagebox.showerror("Error", 
+                               "Invalid start time format. Please use HH:MM:SS format (e.g., 14:30:25)")
+            return
+        
         if not self.video_processor.is_model_loaded():
             messagebox.showerror("Error", "YOLO model not loaded")
             return
@@ -230,7 +252,11 @@ class TollBoothGUI:
         self.status_var.set("Starting video processing...")
         
         # Start processing
-        self.video_processor.start_processing(self.video_path.get(), self.log_path.get())
+        self.video_processor.start_processing(
+            self.video_path.get(), 
+            self.log_path.get(), 
+            self.video_start_time.get().strip()
+        )
     
     def stop_processing(self):
         """Stop video processing."""
@@ -267,7 +293,8 @@ class TollBoothGUI:
     def update_video_info(self, info):
         """Update video information display."""
         text = (f"Processing: {info['original']} → {info['target']} | "
-                f"FPS: {info['fps']:.2f} | Tolerance: {info['tolerance']}px")
+                f"FPS: {info['fps']:.2f} | Tolerance: {info['tolerance']}px | "
+                f"Start Time: {self.video_start_time.get()}")
         self.video_info_label.configure(text=text)
     
     def update_video_display(self, frame):
@@ -304,11 +331,15 @@ class TollBoothGUI:
     
     def add_result_to_tree(self, event):
         """Add a new detection event to the results tree."""
+        # Use real time if available, otherwise fall back to video time
+        start_time = event.get("real_start_time", format_time(event["start_sec_video"]))
+        end_time = event.get("real_end_time", format_time(event["end_sec_video"]))
+        
         self.results_tree.insert("", "end", values=(
             event["vehicle_id"],
             event["vehicle_type"],
-            format_time(event["start_sec_video"]),
-            format_time(event["end_sec_video"]),
+            start_time,
+            end_time,
             f"{event['duration_sec']:.1f}s"
         ))
         
@@ -398,7 +429,7 @@ class TollBoothGUI:
             # Update video info
             self.video_info_label.configure(
                 text=f"Preview: {original_width}x{original_height} → {TARGET_WIDTH}x{TARGET_HEIGHT} | "
-                     f"FPS: {fps:.2f} | Frames: {total_frames} | Ready to process"
+                     f"FPS: {fps:.2f} | Frames: {total_frames} | Start Time: {self.video_start_time.get()} | Ready to process"
             )
             
         except Exception as e:
@@ -421,7 +452,22 @@ class TollBoothGUI:
             font=("Arial", 10)
         )
     
-
+    def validate_time_format(self, time_str):
+        """Validate time format (HH:MM:SS)."""
+        if not time_str:
+            return False
+        try:
+            parts = time_str.split(":")
+            if len(parts) != 3:
+                return False
+            h, m, s = map(int, parts)
+            # Check valid ranges
+            if 0 <= h <= 23 and 0 <= m <= 59 and 0 <= s <= 59:
+                return True
+            return False
+        except (ValueError, AttributeError):
+            return False
+    
 def main():
     """Main entry point for the application."""
     root = tk.Tk()

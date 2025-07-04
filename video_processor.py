@@ -16,7 +16,7 @@ class VideoProcessor:
         self.processing = False
         self.cap = None
     
-    def start_processing(self, video_path, log_path):
+    def start_processing(self, video_path, log_path, video_start_time="00:00:00"):
         """Start video processing in a separate thread."""
         self.processing = True
         self.stationary_tracker.reset()
@@ -24,7 +24,7 @@ class VideoProcessor:
         # Start processing thread
         self.processing_thread = threading.Thread(
             target=self._process_video_thread, 
-            args=(video_path, log_path)
+            args=(video_path, log_path, video_start_time)
         )
         self.processing_thread.daemon = True
         self.processing_thread.start()
@@ -35,9 +35,13 @@ class VideoProcessor:
         if self.cap:
             self.cap.release()
     
-    def _process_video_thread(self, video_path, log_path):
+    def _process_video_thread(self, video_path, log_path, video_start_time):
         """Main video processing loop (runs in separate thread)."""
         try:
+            # Parse video start time
+            from utils import parse_time_to_seconds
+            video_start_time_seconds = parse_time_to_seconds(video_start_time)
+            
             # Open video
             self.cap = cv2.VideoCapture(video_path)
             if not self.cap.isOpened():
@@ -101,8 +105,14 @@ class VideoProcessor:
                 
                 # Add events to log and GUI
                 for event in events:
+                    # Add real time information to event for GUI display
+                    event_with_real_time = event.copy()
+                    from utils import seconds_to_real_time
+                    event_with_real_time["real_start_time"] = seconds_to_real_time(event["start_sec_video"], video_start_time_seconds)
+                    event_with_real_time["real_end_time"] = seconds_to_real_time(event["end_sec_video"], video_start_time_seconds)
+                    
                     stationary_log.append(event)
-                    self._gui_callback("new_event", event)
+                    self._gui_callback("new_event", event_with_real_time)
                 
                 # Create display frame
                 display_frame = self._create_display_frame(
@@ -123,11 +133,17 @@ class VideoProcessor:
             # Finalize any ongoing tracking
             final_events = self.stationary_tracker.finalize((frame_idx - 1) / fps)
             for event in final_events:
+                # Add real time information to event for GUI display
+                event_with_real_time = event.copy()
+                from utils import seconds_to_real_time
+                event_with_real_time["real_start_time"] = seconds_to_real_time(event["start_sec_video"], video_start_time_seconds)
+                event_with_real_time["real_end_time"] = seconds_to_real_time(event["end_sec_video"], video_start_time_seconds)
+                
                 stationary_log.append(event)
-                self._gui_callback("new_event", event)
+                self._gui_callback("new_event", event_with_real_time)
             
             # Save log file
-            self._save_log_file(stationary_log, log_path)
+            self._save_log_file(stationary_log, log_path, video_start_time_seconds)
             
             # Processing complete
             self._gui_callback("processing_complete", len(stationary_log))
@@ -183,9 +199,10 @@ class VideoProcessor:
         
         return display_frame
     
-    def _save_log_file(self, stationary_log, log_path):
-        """Save the stationary events to a log file."""
+    def _save_log_file(self, stationary_log, log_path, video_start_time_seconds=0):
+        """Save the stationary events to a log file with real timestamps."""
         try:
+            from utils import seconds_to_real_time
             col_keys_ordered = ["id", "type", "from", "to", "duration"]
             
             with open(log_path, "w") as f:
@@ -194,13 +211,16 @@ class VideoProcessor:
                 f.write(format_table_row(TABLE_HEADERS, COLUMN_WIDTHS, col_keys_ordered) + "\n")
                 f.write(create_table_line(COLUMN_WIDTHS, col_keys_ordered) + "\n")
                 
-                # Write events
+                # Write events with real timestamps
                 for event in stationary_log:
+                    real_start_time = seconds_to_real_time(event["start_sec_video"], video_start_time_seconds)
+                    real_end_time = seconds_to_real_time(event["end_sec_video"], video_start_time_seconds)
+                    
                     f.write(format_table_row([
                         event["vehicle_id"],
                         event["vehicle_type"],
-                        format_time(event["start_sec_video"]),
-                        format_time(event["end_sec_video"]),
+                        real_start_time,
+                        real_end_time,
                         f"{event['duration_sec']:.1f}",
                     ], COLUMN_WIDTHS, col_keys_ordered) + "\n")
                 

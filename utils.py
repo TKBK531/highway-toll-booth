@@ -72,3 +72,21 @@ def format_table_row(data_tuple, widths_dict, col_keys_ordered):
         parts.append(f" {item_str:<{col_width - 2}} ")
         parts.append("|")
     return "".join(parts)
+
+
+def parse_time_to_seconds(time_str):
+    """Parse time string (HH:MM:SS) to total seconds."""
+    if not time_str:
+        return 0
+    try:
+        h, m, s = map(int, time_str.split(":"))
+        return h * 3600 + m * 60 + s
+    except (ValueError, AttributeError):
+        print(f"Warning: Invalid time format: '{time_str}'. Using 0 offset.")
+        return 0
+
+
+def seconds_to_real_time(video_seconds, start_time_seconds):
+    """Convert video timestamp to real time based on video start time."""
+    real_time_seconds = start_time_seconds + video_seconds
+    return format_time(real_time_seconds)

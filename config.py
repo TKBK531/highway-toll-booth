@@ -46,3 +46,6 @@ TABLE_HEADERS = [
 WINDOW_TITLE = "Highway Toll Booth Vehicle Detection"
 WINDOW_SIZE = "1400x900"
 VIDEO_DISPLAY_SIZE = (640, 360)
+
+# Default video start time (can be overridden by user)
+DEFAULT_VIDEO_START_TIME = "00:00:00"  # HH:MM:SS format
