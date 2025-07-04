@@ -12,7 +12,7 @@ def test_logs_functionality():
         print("🔧 Testing logs folder functionality...")
         
         # Import main GUI components
-        import main_gui
+        import main
         from config import DEFAULT_VIDEO_START_TIME
         
         print(f"✓ GUI module imported successfully")

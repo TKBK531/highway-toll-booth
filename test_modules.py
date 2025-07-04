@@ -20,7 +20,7 @@ def test_imports():
         import video_processor
         print("✓ video_processor.py imported")
         
-        import main_gui
+        import main
         print("✓ main_gui.py imported")
         
         print("\n🎉 All modules imported successfully!")
