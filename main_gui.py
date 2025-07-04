@@ -1,0 +1,324 @@
+import tkinter as tk
+from tkinter import ttk, filedialog, messagebox
+import cv2
+from PIL import Image, ImageTk
+import os
+from video_processor import VideoProcessor
+from utils import format_time
+from config import *
+
+
+class TollBoothGUI:
+    """Main GUI application for the toll booth vehicle detection system."""
+    
+    def __init__(self, root):
+        self.root = root
+        self.root.title(WINDOW_TITLE)
+        self.root.geometry(WINDOW_SIZE)
+        self.root.resizable(True, True)
+        
+        # Variables
+        self.video_path = tk.StringVar()
+        self.log_path = tk.StringVar()
+        self.status_var = tk.StringVar()
+        
+        # Video processor
+        self.video_processor = VideoProcessor(gui_callback=self.handle_processor_callback)
+        
+        # Setup GUI
+        self.setup_gui()
+        self.check_model_status()
+        
+    def setup_gui(self):
+        """Setup the main GUI layout."""
+        # Main container
+        main_frame = ttk.Frame(self.root, padding="10")
+        main_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Configure grid weights
+        self.root.columnconfigure(0, weight=1)
+        self.root.rowconfigure(0, weight=1)
+        main_frame.columnconfigure(1, weight=1)
+        main_frame.rowconfigure(3, weight=1)
+        
+        # Create GUI sections
+        self._create_header(main_frame)
+        self._create_file_selection(main_frame)
+        self._create_controls(main_frame)
+        self._create_main_content(main_frame)
+        self._create_status_bar(main_frame)
+        
+    def _create_header(self, parent):
+        """Create the header section."""
+        title_label = ttk.Label(parent, text="Highway Toll Booth Vehicle Detection", 
+                               font=("Arial", 16, "bold"))
+        title_label.grid(row=0, column=0, columnspan=3, pady=(0, 20))
+        
+    def _create_file_selection(self, parent):
+        """Create the file selection section."""
+        file_frame = ttk.LabelFrame(parent, text="File Selection", padding="10")
+        file_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10))
+        file_frame.columnconfigure(1, weight=1)
+        
+        # Video file selection
+        ttk.Label(file_frame, text="Video File:").grid(row=0, column=0, sticky=tk.W, padx=(0, 10))
+        self.video_entry = ttk.Entry(file_frame, textvariable=self.video_path, width=50)
+        self.video_entry.grid(row=0, column=1, sticky=(tk.W, tk.E), padx=(0, 10))
+        ttk.Button(file_frame, text="Browse", 
+                  command=self.browse_video_file).grid(row=0, column=2)
+        
+        # Log file selection
+        ttk.Label(file_frame, text="Log File:").grid(row=1, column=0, sticky=tk.W, padx=(0, 10), pady=(10, 0))
+        self.log_entry = ttk.Entry(file_frame, textvariable=self.log_path, width=50)
+        self.log_entry.grid(row=1, column=1, sticky=(tk.W, tk.E), padx=(0, 10), pady=(10, 0))
+        ttk.Button(file_frame, text="Browse", 
+                  command=self.browse_log_file).grid(row=1, column=2, pady=(10, 0))
+        
+    def _create_controls(self, parent):
+        """Create the control buttons and progress section."""
+        control_frame = ttk.Frame(parent)
+        control_frame.grid(row=2, column=0, columnspan=3, pady=10)
+        
+        # Process button
+        self.process_btn = ttk.Button(control_frame, text="Start Processing", 
+                                     command=self.start_processing)
+        self.process_btn.pack(side=tk.LEFT, padx=(0, 10))
+        
+        # Stop button
+        self.stop_btn = ttk.Button(control_frame, text="Stop Processing", 
+                                  command=self.stop_processing, state=tk.DISABLED)
+        self.stop_btn.pack(side=tk.LEFT, padx=(0, 20))
+        
+        # Progress bar
+        self.progress_label = ttk.Label(control_frame, text="Ready")
+        self.progress_label.pack(side=tk.LEFT, padx=(0, 10))
+        
+        self.progress_bar = ttk.Progressbar(control_frame, length=300, mode='determinate')
+        self.progress_bar.pack(side=tk.LEFT)
+        
+    def _create_main_content(self, parent):
+        """Create the main content area with video display and results."""
+        content_frame = ttk.Frame(parent)
+        content_frame.grid(row=3, column=0, columnspan=3, sticky=(tk.W, tk.E, tk.N, tk.S))
+        content_frame.columnconfigure(0, weight=1)
+        content_frame.columnconfigure(1, weight=1)
+        content_frame.rowconfigure(0, weight=1)
+        
+        # Video display
+        self._create_video_display(content_frame)
+        
+        # Results display
+        self._create_results_display(content_frame)
+        
+    def _create_video_display(self, parent):
+        """Create the video display section."""
+        video_frame = ttk.LabelFrame(parent, text="Video Processing", padding="5")
+        video_frame.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(0, 5))
+        video_frame.columnconfigure(0, weight=1)
+        video_frame.rowconfigure(0, weight=1)
+        
+        # Video canvas
+        self.video_canvas = tk.Canvas(video_frame, bg="black", 
+                                     width=VIDEO_DISPLAY_SIZE[0], 
+                                     height=VIDEO_DISPLAY_SIZE[1])
+        self.video_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Video info
+        self.video_info_label = ttk.Label(video_frame, text="No video loaded")
+        self.video_info_label.grid(row=1, column=0, pady=(5, 0))
+        
+    def _create_results_display(self, parent):
+        """Create the results display section."""
+        results_frame = ttk.LabelFrame(parent, text="Detection Results", padding="5")
+        results_frame.grid(row=0, column=1, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+        results_frame.columnconfigure(0, weight=1)
+        results_frame.rowconfigure(0, weight=1)
+        
+        # Results treeview
+        columns = ("ID", "Type", "From", "To", "Duration")
+        self.results_tree = ttk.Treeview(results_frame, columns=columns, show="headings", height=15)
+        
+        for col in columns:
+            self.results_tree.heading(col, text=col)
+            self.results_tree.column(col, width=100)
+        
+        self.results_tree.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        
+        # Scrollbar for results
+        scrollbar = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.results_tree.yview)
+        scrollbar.grid(row=0, column=1, sticky=(tk.N, tk.S))
+        self.results_tree.configure(yscrollcommand=scrollbar.set)
+        
+    def _create_status_bar(self, parent):
+        """Create the status bar."""
+        self.status_var.set("Ready - Please select a video file and log location")
+        self.status_bar = ttk.Label(parent, textvariable=self.status_var, 
+                                   relief=tk.SUNKEN, anchor=tk.W)
+        self.status_bar.grid(row=4, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(10, 0))
+        
+    def check_model_status(self):
+        """Check and display model loading status."""
+        if self.video_processor.is_model_loaded():
+            self.status_var.set("YOLO model loaded successfully")
+        else:
+            self.status_var.set("Error: YOLO model not loaded")
+            messagebox.showerror("Model Error", "Failed to load YOLO model")
+    
+    def browse_video_file(self):
+        """Browse for video file."""
+        filename = filedialog.askopenfilename(
+            title="Select Video File",
+            filetypes=[
+                ("Video files", "*.mp4 *.avi *.mov *.mkv *.wmv *.flv"),
+                ("All files", "*.*")
+            ]
+        )
+        if filename:
+            self.video_path.set(filename)
+            self.status_var.set(f"Video selected: {os.path.basename(filename)}")
+    
+    def browse_log_file(self):
+        """Browse for log file location."""
+        filename = filedialog.asksaveasfilename(
+            title="Save Log File As",
+            defaultextension=".txt",
+            filetypes=[
+                ("Text files", "*.txt"),
+                ("All files", "*.*")
+            ]
+        )
+        if filename:
+            self.log_path.set(filename)
+            self.status_var.set(f"Log location: {os.path.basename(filename)}")
+    
+    def start_processing(self):
+        """Start video processing."""
+        # Validation
+        if not self.video_path.get():
+            messagebox.showerror("Error", "Please select a video file")
+            return
+        
+        if not self.log_path.get():
+            messagebox.showerror("Error", "Please select a log file location")
+            return
+        
+        if not self.video_processor.is_model_loaded():
+            messagebox.showerror("Error", "YOLO model not loaded")
+            return
+        
+        # Clear previous results
+        for item in self.results_tree.get_children():
+            self.results_tree.delete(item)
+        
+        # Update UI
+        self.process_btn.configure(state=tk.DISABLED)
+        self.stop_btn.configure(state=tk.NORMAL)
+        self.progress_bar['value'] = 0
+        self.status_var.set("Starting video processing...")
+        
+        # Start processing
+        self.video_processor.start_processing(self.video_path.get(), self.log_path.get())
+    
+    def stop_processing(self):
+        """Stop video processing."""
+        self.video_processor.stop_processing()
+        self.reset_ui()
+        self.status_var.set("Processing stopped by user")
+    
+    def reset_ui(self):
+        """Reset UI to initial state."""
+        self.process_btn.configure(state=tk.NORMAL)
+        self.stop_btn.configure(state=tk.DISABLED)
+    
+    def handle_processor_callback(self, event_type, data):
+        """Handle callbacks from the video processor."""
+        if event_type == "error":
+            self.root.after(0, lambda: messagebox.showerror("Error", data))
+        elif event_type == "video_info":
+            self.root.after(0, lambda: self.update_video_info(data))
+        elif event_type == "frame_update":
+            self.root.after(0, lambda: self.update_video_display(data))
+        elif event_type == "progress_update":
+            self.root.after(0, lambda: self.update_progress(data))
+        elif event_type == "new_event":
+            self.root.after(0, lambda: self.add_result_to_tree(data))
+        elif event_type == "processing_complete":
+            self.root.after(0, lambda: self.processing_complete(data))
+        elif event_type == "processing_finished":
+            self.root.after(0, self.reset_ui)
+    
+    def update_video_info(self, info):
+        """Update video information display."""
+        text = (f"Original: {info['original']} | Target: {info['target']} | "
+                f"FPS: {info['fps']:.2f} | Tolerance: {info['tolerance']}px")
+        self.video_info_label.configure(text=text)
+    
+    def update_video_display(self, frame):
+        """Update the video display with new frame."""
+        # Resize frame for display
+        display_frame = cv2.resize(frame, VIDEO_DISPLAY_SIZE)
+        
+        # Convert BGR to RGB
+        rgb_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+        
+        # Convert to PIL Image and then PhotoImage
+        pil_image = Image.fromarray(rgb_frame)
+        photo = ImageTk.PhotoImage(pil_image)
+        
+        # Update canvas
+        self.video_canvas.delete("all")
+        self.video_canvas.create_image(
+            VIDEO_DISPLAY_SIZE[0]//2, VIDEO_DISPLAY_SIZE[1]//2, 
+            anchor=tk.CENTER, image=photo
+        )
+        self.video_canvas.image = photo  # Keep a reference
+    
+    def update_progress(self, progress_data):
+        """Update progress bar and labels."""
+        progress = progress_data["progress"]
+        current_frame = progress_data["current_frame"]
+        total_frames = progress_data["total_frames"]
+        
+        self.progress_bar['value'] = progress
+        self.progress_label.configure(
+            text=f"Frame {current_frame}/{total_frames} ({progress:.1f}%)"
+        )
+        self.status_var.set(f"Processing... {progress:.1f}% complete")
+    
+    def add_result_to_tree(self, event):
+        """Add a new detection event to the results tree."""
+        self.results_tree.insert("", "end", values=(
+            event["vehicle_id"],
+            event["vehicle_type"],
+            format_time(event["start_sec_video"]),
+            format_time(event["end_sec_video"]),
+            f"{event['duration_sec']:.1f}s"
+        ))
+        
+        # Scroll to the bottom
+        children = self.results_tree.get_children()
+        if children:
+            self.results_tree.see(children[-1])
+    
+    def processing_complete(self, event_count):
+        """Handle processing completion."""
+        self.status_var.set(f"Processing complete! Found {event_count} stationary events")
+        self.progress_bar['value'] = 100
+        self.progress_label.configure(text="Complete")
+        messagebox.showinfo(
+            "Processing Complete", 
+            f"Video processing completed successfully!\n\n"
+            f"Detected {event_count} stationary events.\n"
+            f"Results saved to: {self.log_path.get()}"
+        )
+
+
+def main():
+    """Main entry point for the application."""
+    root = tk.Tk()
+    app = TollBoothGUI(root)
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
